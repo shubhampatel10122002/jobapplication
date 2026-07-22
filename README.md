@@ -23,10 +23,17 @@ screening-question answers with an LLM before submitting.
   the LLM: disability = No, protected veteran = No, race = Asian (not Hispanic or
   Latino), gender = Male.
 - **Job inspector UI** — paste a URL on the home page to see the parsed form, the
-  eligibility verdict (with the matched sentences), and the planned answer source for
-  every field.
+  eligibility verdict (with the matched sentences), and the planned answer (with its
+  source) for every field, previewed against your saved profile.
 - **Database schema** (`src/db/schema.ts`) — profile, jobs, applications, per-question
   answers (powers the post-application review screen), and an LLM answer cache.
+- **Profile** (`/profile`) — upload a resume PDF and the LLM (Gemini 3.6 Flash by
+  default, Groq optional via `LLM_PROVIDER=groq`) extracts a structured profile you can
+  review and edit; plus a free-form knowledge base the AI uses as context for
+  screening questions.
+- **Answer engine** (`src/lib/answer/`) — deterministic profile mapping for identity
+  fields, fixed EEO defaults, LLM answers (constrained to the exact options for select
+  questions) with a Postgres-backed cache keyed on question hash + profile version.
 
 ## Getting started
 
@@ -47,9 +54,9 @@ pnpm test:live   # + live smoke tests against real Greenhouse/Ashby/Lever boards
 
 ## Roadmap
 
-1. ~~ATS adapters + eligibility filter + EEO defaults~~ (this milestone)
-2. Profile: resume upload + LLM parsing into a structured profile, knowledge base
-3. Answer engine: LLM answers for screening questions (Gemini Flash), answer cache
+1. ~~ATS adapters + eligibility filter + EEO defaults~~
+2. ~~Profile: resume upload + LLM parsing into a structured profile, knowledge base~~
+3. ~~Answer engine: LLM answers for screening questions, answer cache~~ (this milestone)
 4. Submission: Ashby/Greenhouse structured submit, Playwright fallback, audit trail
    with per-question answers + confirmation screenshot
 5. Job discovery: poll tracked company boards for new matching postings

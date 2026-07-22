@@ -1,7 +1,9 @@
+import { getProfileRow } from "@/db/repo";
+import { planAnswers, type PlannedAnswer } from "@/lib/answer/engine";
 import { fetchJobFromUrl } from "@/lib/ats";
 import type { NormalizedField, NormalizedJob } from "@/lib/ats";
 import { checkEligibility, type EligibilityResult } from "@/lib/eligibility/filter";
-import { resolveEeoAnswer } from "@/lib/profile/eeo";
+import { EMPTY_PROFILE } from "@/lib/profile/types";
 
 export const dynamic = "force-dynamic";
 
@@ -9,24 +11,31 @@ const SOURCE_STYLES: Record<string, string> = {
   profile: "bg-sky-100 text-sky-800",
   eeo_default: "bg-violet-100 text-violet-800",
   llm: "bg-amber-100 text-amber-800",
+  resume_file: "bg-sky-100 text-sky-800",
+  unresolved: "bg-zinc-100 text-zinc-600",
 };
 
 const SOURCE_LABELS: Record<string, string> = {
   profile: "profile",
   eeo_default: "EEO default",
   llm: "LLM",
+  resume_file: "resume",
+  unresolved: "needs input",
 };
 
-function plannedAnswer(field: NormalizedField): string {
-  if (field.answerSource === "eeo_default") {
-    const answer = resolveEeoAnswer(field);
-    return answer ? `"${answer.label}"` : "no matching option — manual review";
+function answerPreview(planned: PlannedAnswer): string {
+  if (planned.valueLabel) return `"${planned.valueLabel}"`;
+  if (planned.source === "resume_file") {
+    return planned.needsReview ? "needs your file" : "left empty (optional upload)";
   }
-  if (field.answerSource === "profile") return "from profile";
-  return "generated from resume + job description";
+  if (planned.field.answerSource === "llm") {
+    return "generated at apply time from resume + job description";
+  }
+  return planned.needsReview ? "needs your input" : "from profile (fill your profile first)";
 }
 
-function FieldRow({ field }: { field: NormalizedField }) {
+function FieldRow({ planned }: { planned: PlannedAnswer }) {
+  const { field } = planned;
   return (
     <tr className="border-b border-zinc-100 last:border-0">
       <td className="py-2.5 pr-4 align-top">
@@ -48,13 +57,13 @@ function FieldRow({ field }: { field: NormalizedField }) {
       <td className="py-2.5 pr-4 align-top">
         <span
           className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-            SOURCE_STYLES[field.answerSource]
+            SOURCE_STYLES[planned.source]
           }`}
         >
-          {SOURCE_LABELS[field.answerSource]}
+          {SOURCE_LABELS[planned.source]}
         </span>
       </td>
-      <td className="py-2.5 align-top text-zinc-600">{plannedAnswer(field)}</td>
+      <td className="py-2.5 align-top text-zinc-600">{answerPreview(planned)}</td>
     </tr>
   );
 }
@@ -85,8 +94,29 @@ function EligibilityBanner({ result }: { result: EligibilityResult }) {
   );
 }
 
-function JobResult({ job }: { job: NormalizedJob }) {
+async function JobResult({ job }: { job: NormalizedJob }) {
   const eligibility = checkEligibility(job.descriptionText);
+
+  // Preview answers with the saved profile (deterministic + EEO only — LLM answers
+  // are generated at apply time). Falls back to an empty profile when DB is down.
+  let profileData = EMPTY_PROFILE;
+  let knowledgeBase: string[] = [];
+  try {
+    const row = await getProfileRow();
+    if (row) {
+      profileData = row.data;
+      knowledgeBase = row.knowledgeBase;
+    }
+  } catch {
+    // DB not running — preview still works, just without profile values.
+  }
+  const plannedAnswers = await planAnswers({
+    job,
+    profile: profileData,
+    knowledgeBase,
+  });
+  const byFieldIndex = new Map(job.fields.map((f, i) => [f, plannedAnswers[i]]));
+
   const sections: { title: string; keys: NormalizedField["section"][] }[] = [
     { title: "Application questions", keys: ["standard", "custom"] },
     { title: "EEO / demographic questions", keys: ["eeoc", "demographic"] },
@@ -126,7 +156,7 @@ function JobResult({ job }: { job: NormalizedJob }) {
                 </thead>
                 <tbody>
                   {fields.map((f, i) => (
-                    <FieldRow key={`${f.id}-${i}`} field={f} />
+                    <FieldRow key={`${f.id}-${i}`} planned={byFieldIndex.get(f)!} />
                   ))}
                 </tbody>
               </table>
