@@ -15,9 +15,13 @@ function activeProvider(): "groq" | "google" | null {
   if (process.env.LLM_PROVIDER === "groq") {
     return process.env.GROQ_API_KEY ? "groq" : null;
   }
-  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) return "google";
-  // No explicit provider and no Google key — fall back to Groq when available.
+  if (process.env.LLM_PROVIDER === "google") {
+    return process.env.GOOGLE_GENERATIVE_AI_API_KEY ? "google" : null;
+  }
+  // No explicit provider: prefer Groq (better free tier: ~1000 req/day vs Gemini's
+  // dynamic per-project quota), fall back to Google.
   if (process.env.GROQ_API_KEY) return "groq";
+  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) return "google";
   return null;
 }
 
@@ -34,7 +38,8 @@ let lastCallAt = 0;
 let queue: Promise<unknown> = Promise.resolve();
 
 export function rateLimited<T>(fn: () => Promise<T>): Promise<T> {
-  const defaultInterval = activeProvider() === "groq" ? 0 : 13_000;
+  // Groq free tier: 30 requests/min -> 2.5s spacing. Gemini free tier: ~5/min -> 13s.
+  const defaultInterval = activeProvider() === "groq" ? 2_500 : 13_000;
   const minInterval = Number(process.env.LLM_MIN_INTERVAL_MS ?? defaultInterval);
   const run = queue.then(async () => {
     const wait = lastCallAt + minInterval - Date.now();
@@ -50,7 +55,9 @@ export function getModel(): LanguageModel {
   const provider = activeProvider();
   if (provider === "groq") {
     const groq = createGroq({ apiKey: process.env.GROQ_API_KEY });
-    return groq(process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile");
+    // llama-3.3-70b-versatile is deprecated (shutdown 2026-08-16); gpt-oss-120b is
+    // Groq's recommended replacement with a 1000 req/day free tier.
+    return groq(process.env.GROQ_MODEL ?? "openai/gpt-oss-120b");
   }
   if (provider === "google") {
     const google = createGoogleGenerativeAI({
