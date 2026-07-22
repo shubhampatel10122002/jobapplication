@@ -39,9 +39,10 @@ screening-question answers with an LLM before submitting.
   in the database (no duplicate applications, ever).
 - **Submission** (`src/lib/submit/`) — Playwright fills the real hosted form
   (Greenhouse job-boards, Lever, Ashby incl. Yes/No buttons, radio groups, custom
-  selects, consent checkboxes) and screenshots it. **Dry-run by default**: it never
-  clicks submit until you set `AUTO_SUBMIT=1`. Custom career sites (e.g. Stripe) and
-  visible CAPTCHAs are flagged `needs_attention` instead of guessing.
+  selects, consent checkboxes) and screenshots it. **Live submit by default**.
+  Set `DRY_RUN=1` (or `AUTO_SUBMIT=0`) to fill and screenshot without clicking
+  submit. Custom career sites (e.g. Stripe) and visible CAPTCHAs are flagged
+  `needs_attention` instead of guessing.
 - **Application tracker** (`/applications`) — every application with status, the exact
   answers given per question, and the form screenshot.
 

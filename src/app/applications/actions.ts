@@ -17,6 +17,7 @@ import { llmAnswer } from "@/lib/answer/llm";
 import { fetchJobFromUrl } from "@/lib/ats";
 import { checkEligibility } from "@/lib/eligibility/filter";
 import { hasLlmKey } from "@/lib/llm";
+import { isDryRun } from "@/lib/submit/mode";
 import { submitWithPlaywright } from "@/lib/submit/playwright";
 
 export interface ActionState {
@@ -143,7 +144,7 @@ export async function submitApplicationAction(
         valueLabel: a.answerLabel,
       }));
 
-    const dryRun = process.env.AUTO_SUBMIT !== "1";
+    const dryRun = isDryRun();
     const screenshotPath = path.join(
       process.cwd(),
       "data",

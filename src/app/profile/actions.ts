@@ -27,8 +27,10 @@ export async function uploadResumeAction(
       return { error: "Only PDF resumes are supported for now." };
     }
 
-    const buffer = await file.arrayBuffer();
-    const resumeText = await extractPdfText(buffer);
+    // Keep a Node Buffer for disk write; extractPdfText copies before PDF.js
+    // can detach the underlying ArrayBuffer.
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const resumeText = await extractPdfText(bytes);
     if (resumeText.length < 100) {
       return { error: "Could not extract text from this PDF (is it a scan?)." };
     }
@@ -45,7 +47,7 @@ export async function uploadResumeAction(
 
     await mkdir(DATA_DIR, { recursive: true });
     const resumePath = path.join(DATA_DIR, "resume.pdf");
-    await writeFile(resumePath, Buffer.from(buffer));
+    await writeFile(resumePath, bytes);
 
     await saveProfile(parsed, { resumePath, resumeText });
     revalidatePath("/profile");

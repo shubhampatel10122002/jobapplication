@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getApplicationDetail } from "@/db/applications";
+import { isLiveSubmit } from "@/lib/submit/mode";
 import { ReviewForm } from "./review-form";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export default async function ApplicationDetailPage({
   const { application, job, answers } = detail;
   const optionsByFieldId = new Map(job.formFields.map((f) => [f.id, f.options]));
   const skipped = job.eligibilityVerdict === "skip";
-  const autoSubmit = process.env.AUTO_SUBMIT === "1";
+  const autoSubmit = isLiveSubmit();
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-12">

@@ -142,8 +142,8 @@ export function ReviewForm({
           <h2 className="font-semibold text-zinc-900">Submit</h2>
           <p className="mt-1 text-sm text-zinc-500">
             {autoSubmit
-              ? "Auto-submit is ON — this fills the real form and clicks submit."
-              : "Dry-run mode (default): the agent fills the real form and screenshots it, but does NOT submit. Set AUTO_SUBMIT=1 in .env to enable real submission."}
+              ? "Live submit is ON — this fills the real form and clicks submit."
+              : "Dry-run mode: the agent fills the real form and screenshots it, but does NOT submit. Unset DRY_RUN (or set AUTO_SUBMIT=1) for live submission."}
           </p>
           <div className="mt-4 flex items-center gap-3">
             <button
