@@ -83,6 +83,22 @@ function AnswerControl({ item }: { item: AnswerItem }) {
       />
     );
   }
+  if (item.type === "location") {
+    return (
+      <div>
+        <input
+          name={name}
+          defaultValue={item.value ?? ""}
+          placeholder="City, Region, Country — must match an autocomplete suggestion on the real form"
+          className={inputCls}
+        />
+        <p className="mt-1 text-xs text-zinc-400">
+          On the live board this is an autocomplete. Enter a real place name (e.g. “New York City”);
+          the agent will type it and pick a dropdown match.
+        </p>
+      </div>
+    );
+  }
   return <input name={name} defaultValue={item.value ?? ""} className={inputCls} />;
 }
 

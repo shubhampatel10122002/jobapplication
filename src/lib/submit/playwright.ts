@@ -11,8 +11,6 @@ function applyUrl(ref: JobRef): string {
     case "ashby":
       return `https://jobs.ashbyhq.com/${encodeURIComponent(ref.company)}/${ref.jobId}/application`;
     case "greenhouse":
-      // Canonical hosted board. Companies with fully custom career sites redirect
-      // away from greenhouse.io — we detect that and bail to needs_attention.
       return `https://job-boards.greenhouse.io/${ref.company}/jobs/${ref.jobId}`;
   }
 }
@@ -24,8 +22,8 @@ const HOSTED_DOMAINS: Record<JobRef["ats"], RegExp> = {
 };
 
 const SUBMIT_BUTTON_SELECTORS = [
-  "button#btn-submit", // Lever
-  "input#submit_app", // Greenhouse classic
+  "button#btn-submit",
+  "input#submit_app",
   'button[type="submit"]:has-text("Submit")',
   'button:has-text("Submit application")',
   'button:has-text("Submit Application")',
@@ -39,8 +37,6 @@ const CONFIRMATION_TEXT =
   /(thank(s| you).{0,40}appl|we('ve| have) received.{0,40}appl|application (has been |was )?(submitted|received|sent)|successfully submitted|your application (is|was) (in|submitted)|application received)/i;
 
 async function visibleCaptcha(page: Page): Promise<boolean> {
-  // The reCAPTCHA v3 corner badge (.grecaptcha-badge) is not a challenge — invisible
-  // verification happens without user interaction, so it must not block submission.
   const selectors = [
     'iframe[src*="recaptcha"]:not(.grecaptcha-badge iframe)',
     'iframe[src*="hcaptcha"]',
@@ -50,14 +46,11 @@ async function visibleCaptcha(page: Page): Promise<boolean> {
   ];
   for (const sel of selectors) {
     const el = page.locator(sel).first();
-    if ((await el.count()) > 0 && (await el.isVisible().catch(() => false))) {
-      return true;
-    }
+    if ((await el.count()) > 0 && (await el.isVisible().catch(() => false))) return true;
   }
   return false;
 }
 
-/** Close "we prefilled your info" style modals that block clicks after resume upload. */
 async function dismissOverlays(page: Page): Promise<void> {
   const dialog = page.locator('[role="dialog"], [aria-modal="true"]').first();
   if ((await dialog.count()) === 0 || !(await dialog.isVisible().catch(() => false))) return;
@@ -82,59 +75,12 @@ async function firstUsable(candidates: Locator[]): Promise<Locator | null> {
   for (const cand of candidates) {
     try {
       const first = cand.first();
-      if ((await first.count()) > 0 && (await first.isVisible().catch(() => false))) {
-        return first;
-      }
+      if ((await first.count()) > 0 && (await first.isVisible().catch(() => false))) return first;
     } catch {
-      // invalid selector — keep trying
+      // keep trying
     }
   }
   return null;
-}
-
-/** Direct form control: by ATS-native name/id, or by accessible label. */
-async function findControl(page: Page, answer: ResolvedAnswer): Promise<Locator | null> {
-  const { field } = answer;
-  return firstUsable([
-    page.locator(`[name="${field.id}"]`),
-    page.locator(`[id="${field.id}"]`),
-    page.getByLabel(field.label, { exact: false }),
-  ]);
-}
-
-/**
- * Widget-group container for fields whose <label for=...> does not point at a real
- * control (Ashby booleans/radios/selects). The label and the widget share a parent.
- */
-async function findFieldContainer(page: Page, answer: ResolvedAnswer): Promise<Locator | null> {
-  const { field } = answer;
-  const labelSnippet = field.label.slice(0, 60).replace(/"/g, '\\"');
-  const label = await firstUsable([
-    page.locator(`label[for="${field.id}"]`),
-    page.locator(`label:has-text("${labelSnippet}")`),
-    page.locator(`legend:has-text("${labelSnippet}")`),
-  ]);
-  if (!label) return null;
-  // Walk up from the label until an ancestor contains an interactive widget.
-  let container = label.locator("xpath=..");
-  for (let depth = 0; depth < 4; depth++) {
-    const widgets = container.locator(
-      'input:not([type=hidden]), textarea, select, button, [role="radio"], [role="combobox"]',
-    );
-    if ((await widgets.count().catch(() => 0)) > 0) return container;
-    container = container.locator("xpath=..");
-  }
-  return null;
-}
-
-async function pickComboOption(page: Page, text: string): Promise<void> {
-  await page.waitForTimeout(600);
-  const option = page.getByRole("option", { name: text, exact: false }).first();
-  if ((await option.count()) > 0 && (await option.isVisible().catch(() => false))) {
-    await option.click();
-  } else {
-    await page.keyboard.press("Enter");
-  }
 }
 
 function displayText(answer: ResolvedAnswer): string {
@@ -143,13 +89,8 @@ function displayText(answer: ResolvedAnswer): string {
 
 function bareYesNo(answer: ResolvedAnswer): "Yes" | "No" | null {
   const text = displayText(answer);
-  if (/^(y|yes|true|1)$/i.test(text) || (/^y/i.test(text) && answer.field.type === "boolean")) {
-    return "Yes";
-  }
-  if (/^(n|no|false|0)$/i.test(text) || (/^n/i.test(text) && answer.field.type === "boolean")) {
-    return "No";
-  }
-  // Sentence answers from older LLM runs: "Yes, I am authorized..."
+  if (/^(y|yes|true|1)$/i.test(text)) return "Yes";
+  if (/^(n|no|false|0)$/i.test(text)) return "No";
   if (answer.field.type === "boolean") {
     if (/\byes\b/i.test(text) && !/\bno\b/i.test(text)) return "Yes";
     if (/\bno\b/i.test(text)) return "No";
@@ -157,9 +98,141 @@ function bareYesNo(answer: ResolvedAnswer): "Yes" | "No" | null {
   return null;
 }
 
+function isSelectedButtonClass(cls: string): boolean {
+  return /(?:^|_)(active|selected|checked|pressed)(?:_|$)/i.test(cls);
+}
+
+/**
+ * Find the smallest ancestor of the question text that contains interactive widgets.
+ * Ashby often uses plain text (not <label>) for boolean / location prompts.
+ * For Yes/No, require exactly one Yes and one No in the subtree so we don't grab the whole form.
+ */
+async function findQuestionRoot(page: Page, answer: ResolvedAnswer): Promise<Locator | null> {
+  const { field } = answer;
+  const snippet = field.label.slice(0, 80).replace(/"/g, '\\"');
+
+  const anchors = await firstUsable([
+    page.locator(`label[for="${field.id}"]`),
+    page.locator(`label:has-text("${snippet}")`),
+    page.locator(`legend:has-text("${snippet}")`),
+    page.getByText(field.label, { exact: true }),
+    page.getByText(new RegExp(field.label.slice(0, 50).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")),
+  ]);
+  if (!anchors) return null;
+
+  if (field.type === "boolean" || bareYesNo(answer)) {
+    const yesNoRoot = anchors.locator(
+      "xpath=ancestor-or-self::*[.//button[normalize-space()='Yes'] and .//button[normalize-space()='No'] and count(.//button[normalize-space()='Yes'])=1 and count(.//button[normalize-space()='No'])=1][1]",
+    );
+    if ((await yesNoRoot.count().catch(() => 0)) > 0) return yesNoRoot.first();
+  }
+
+  for (const xpath of [
+    "xpath=ancestor-or-self::*[(.//input or .//textarea or .//select or .//*[@role='combobox']) and not(self::body) and not(self::html)][1]",
+    "xpath=ancestor-or-self::*[.//button or .//input or .//*[@role='radio']][1]",
+  ]) {
+    const root = anchors.locator(xpath);
+    if ((await root.count().catch(() => 0)) > 0) {
+      const candidate = root.first();
+      const inputCount = await candidate.locator("input, textarea, button").count().catch(() => 99);
+      if (inputCount > 0 && inputCount <= 12) return candidate;
+    }
+  }
+  return anchors.locator("xpath=..").first();
+}
+
+async function findControl(page: Page, answer: ResolvedAnswer): Promise<Locator | null> {
+  const { field } = answer;
+  const root = await findQuestionRoot(page, answer);
+  return firstUsable([
+    page.locator(`[name="${field.id}"]`),
+    page.locator(`[id="${field.id}"]`),
+    page.getByLabel(field.label, { exact: false }),
+    root ? root.locator('input:not([type="hidden"]), textarea, select, [role="combobox"]').first() : page.locator(":unreachable"),
+  ]);
+}
+
+async function selectAutocompleteOption(page: Page, query: string): Promise<boolean> {
+  await page.waitForTimeout(700);
+  const options = page.locator('[role="option"]');
+  try {
+    await options.first().waitFor({ state: "visible", timeout: 5_000 });
+  } catch {
+    return false;
+  }
+  const texts = await options.allTextContents();
+  const normalized = query.trim().toLowerCase();
+  let bestIdx = texts.findIndex((t) => t.trim().toLowerCase() === normalized);
+  if (bestIdx < 0) {
+    bestIdx = texts.findIndex((t) => t.trim().toLowerCase().startsWith(normalized));
+  }
+  if (bestIdx < 0) {
+    bestIdx = texts.findIndex((t) => t.toLowerCase().includes(normalized.split(",")[0] ?? normalized));
+  }
+  if (bestIdx < 0) bestIdx = 0;
+  await options.nth(bestIdx).click();
+  await page.waitForTimeout(300);
+  return true;
+}
+
+/** Type into a location/combobox and commit a dropdown option (required by Ashby). */
+async function fillCombobox(page: Page, control: Locator, value: string): Promise<boolean> {
+  await control.click({ clickCount: 3 }).catch(() => control.click());
+  await control.fill("");
+  // pressSequentially triggers Ashby/Google Places style suggestion fetches; fill() often does not.
+  await control.pressSequentially(value, { delay: 35 }).catch(async () => {
+    await page.keyboard.type(value, { delay: 35 });
+  });
+  const picked = await selectAutocompleteOption(page, value);
+  if (picked) return true;
+  // Fallback: keyboard commit first suggestion.
+  await page.keyboard.press("ArrowDown").catch(() => {});
+  await page.keyboard.press("Enter").catch(() => {});
+  await page.waitForTimeout(300);
+  // Consider success if the input now contains a longer structured location string.
+  const current = (await control.inputValue().catch(() => "")) || "";
+  return current.length >= value.length && /,/i.test(current);
+}
+
+async function fillYesNo(root: Locator, want: "Yes" | "No"): Promise<boolean> {
+  const buttons = root.locator("button");
+  const count = await buttons.count();
+  if (count < 2) return false;
+
+  // Prefer an exact Yes/No pair in this root (Ashby option buttons).
+  const target = buttons.filter({ hasText: new RegExp(`^${want}$`, "i") }).first();
+  if ((await target.count()) === 0) return false;
+  await target.click();
+  await root.page().waitForTimeout(200);
+
+  const states = await buttons.evaluateAll((els) =>
+    els.map((b) => ({
+      text: (b.textContent || "").trim(),
+      cls: b.className?.toString?.() ?? "",
+      ariaPressed: b.getAttribute("aria-pressed"),
+      ariaChecked: b.getAttribute("aria-checked"),
+    })),
+  );
+  const selected = states.find(
+    (s) =>
+      new RegExp(`^${want}$`, "i").test(s.text) &&
+      (s.ariaPressed === "true" ||
+        s.ariaChecked === "true" ||
+        isSelectedButtonClass(s.cls)),
+  );
+  if (selected) return true;
+  // Some boards don't expose selected state via class — accept click if the pair exists.
+  return states.some((s) => new RegExp(`^${want}$`, "i").test(s.text));
+}
+
 async function fillControl(page: Page, control: Locator, answer: ResolvedAnswer): Promise<boolean> {
   const tag = (await control.evaluate((el) => el.tagName)).toLowerCase();
   const text = displayText(answer);
+  const role = await control.getAttribute("role");
+  const ariaAutocomplete = await control.getAttribute("aria-autocomplete");
+  const type = (await control.getAttribute("type")) ?? "text";
+
+  if (answer.field.type === "boolean") return false;
 
   if (tag === "select") {
     try {
@@ -175,112 +248,91 @@ async function fillControl(page: Page, control: Locator, answer: ResolvedAnswer)
     }
   }
 
-  const role = await control.getAttribute("role");
-  const ariaAutocomplete = await control.getAttribute("aria-autocomplete");
-  if (role === "combobox" || ariaAutocomplete === "list") {
-    await control.click();
-    await control.fill(text).catch(async () => {
-      await page.keyboard.type(text, { delay: 20 });
-    });
-    await pickComboOption(page, text);
-    return true;
+  if (
+    role === "combobox" ||
+    ariaAutocomplete === "list" ||
+    answer.field.type === "location"
+  ) {
+    return fillCombobox(page, control, text);
   }
 
   if (tag === "input" || tag === "textarea") {
-    const type = (await control.getAttribute("type")) ?? "text";
     if (type === "checkbox") {
-      if (/^(yes|true|1|on)$/i.test(answer.value) || bareYesNo(answer) === "Yes") {
+      if (bareYesNo(answer) === "Yes" || /^(yes|true|1|on)$/i.test(answer.value)) {
         await control.check();
       }
       return true;
     }
-    if (type === "radio") return false; // handled via container
+    if (type === "radio") return false;
     if (type === "date") {
-      // Native date inputs want YYYY-MM-DD.
       const iso = /^\d{4}-\d{2}-\d{2}$/.test(answer.value) ? answer.value : text;
       await control.fill(iso);
       return true;
     }
-    // Don't dump Yes/No prose into a text box when this is a boolean field —
-    // let the widget-group path click the real button.
-    if (answer.field.type === "boolean") return false;
     await control.fill(answer.value);
     return true;
   }
   return false;
 }
 
-/** Boolean buttons, radio groups, checkboxes, custom selects inside a field container. */
 async function fillWidgetGroup(
   page: Page,
-  container: Locator,
+  root: Locator,
   answer: ResolvedAnswer,
 ): Promise<boolean> {
   const yesNo = bareYesNo(answer);
-  const text = yesNo ?? displayText(answer);
+  if ((answer.field.type === "boolean" || yesNo) && yesNo) {
+    if (await fillYesNo(root, yesNo)) return true;
+  }
 
-  const radio = container.getByRole("radio", { name: text, exact: false }).first();
+  const text = yesNo ?? displayText(answer);
+  const radio = root.getByRole("radio", { name: text, exact: false }).first();
   if ((await radio.count()) > 0) {
     await radio.check({ force: true }).catch(() => radio.click());
     return true;
   }
-  const optionLabel = container.locator(`label:has-text("${text.replace(/"/g, '\\"')}")`).first();
+
+  // Native radio/checkbox wrapped in labels.
+  const optionLabel = root.locator(`label:has-text("${text.replace(/"/g, '\\"')}")`).first();
   if (
-    (await container.locator('input[type="radio"], input[type="checkbox"]').count()) > 0 &&
+    (await root.locator('input[type="radio"], input[type="checkbox"]').count()) > 0 &&
     (await optionLabel.count()) > 0
   ) {
     await optionLabel.click();
     return true;
   }
 
-  if (answer.field.type === "boolean" || yesNo || /^(yes|no)$/i.test(text)) {
-    const button = container
-      .getByRole("button", { name: new RegExp(`^${text}$`, "i") })
-      .first();
-    if ((await button.count()) > 0) {
-      await button.click();
-      return true;
-    }
+  if (answer.field.type === "location" || answer.field.type === "date") {
+    const input = root.locator('input:not([type="hidden"]), [role="combobox"]').first();
+    if ((await input.count()) > 0) return fillControl(page, input, answer);
   }
 
-  // Consent/acknowledgement style fields: a single checkbox under the label. Check it
-  // unless the answer is explicitly negative (the user reviewed the answer already).
-  const checkboxes = container.locator('input[type="checkbox"]');
-  if ((await checkboxes.count()) === 1 && bareYesNo(answer) !== "No") {
+  // Single consent checkbox.
+  const checkboxes = root.locator('input[type="checkbox"]');
+  if ((await checkboxes.count()) === 1 && yesNo !== "No") {
     await checkboxes.first().check({ force: true });
     return true;
   }
 
-  // Date pickers: try a native date input inside the group.
-  if (answer.field.type === "date") {
-    const dateInput = container.locator('input[type="date"]').first();
-    if ((await dateInput.count()) > 0) {
-      await dateInput.fill(answer.value);
-      return true;
-    }
-    const anyInput = container.locator("input:not([type=hidden])").first();
-    if ((await anyInput.count()) > 0) {
-      await anyInput.click();
-      await anyInput.fill(displayText(answer));
-      await page.keyboard.press("Enter").catch(() => {});
-      return true;
-    }
-  }
-
-  const innerInput = container.locator("input:not([type=hidden]), textarea, select").first();
-  if ((await innerInput.count()) > 0 && answer.field.type !== "boolean") {
-    return fillControl(page, innerInput, answer);
+  const inner = root.locator("input:not([type=hidden]), textarea, select, [role='combobox']").first();
+  if ((await inner.count()) > 0 && answer.field.type !== "boolean") {
+    return fillControl(page, inner, answer);
   }
   return false;
 }
 
 async function fillAnswer(page: Page, answer: ResolvedAnswer): Promise<boolean> {
-  // Boolean / custom widgets: prefer the labeled container so we click Yes/No
-  // buttons instead of typing into a nearby text control.
-  if (answer.field.type === "boolean" || answer.field.type === "select" || answer.field.type === "date") {
-    const container = await findFieldContainer(page, answer);
-    if (container) {
-      const done = await fillWidgetGroup(page, container, answer);
+  const needsWidgetFirst =
+    answer.field.type === "boolean" ||
+    answer.field.type === "select" ||
+    answer.field.type === "multi_select" ||
+    answer.field.type === "date" ||
+    answer.field.type === "location";
+
+  if (needsWidgetFirst) {
+    const root = await findQuestionRoot(page, answer);
+    if (root) {
+      const done = await fillWidgetGroup(page, root, answer);
       if (done) return true;
     }
   }
@@ -291,35 +343,23 @@ async function fillAnswer(page: Page, answer: ResolvedAnswer): Promise<boolean> 
     if (done) return true;
   }
 
-  const container = await findFieldContainer(page, answer);
-  if (container) return fillWidgetGroup(page, container, answer);
+  const root = await findQuestionRoot(page, answer);
+  if (root) return fillWidgetGroup(page, root, answer);
+  return false;
+}
+
+async function submitStillVisible(page: Page): Promise<boolean> {
+  for (const sel of SUBMIT_BUTTON_SELECTORS) {
+    const button = page.locator(sel).first();
+    if ((await button.count()) > 0 && (await button.isVisible().catch(() => false))) return true;
+  }
   return false;
 }
 
 async function detectConfirmation(page: Page): Promise<boolean> {
   if (CONFIRMATION_URL.test(page.url())) return true;
-
   const bodyText = (await page.locator("body").innerText().catch(() => "")).slice(0, 8_000);
   if (CONFIRMATION_TEXT.test(bodyText)) return true;
-
-  const visible = await page
-    .locator(`:text-matches("${CONFIRMATION_TEXT.source}", "i")`)
-    .first()
-    .isVisible()
-    .catch(() => false);
-  if (visible) return true;
-
-  // SPA success: submit controls gone and no obvious validation errors left.
-  const submitStillThere = await page
-    .locator(SUBMIT_BUTTON_SELECTORS.join(", "))
-    .first()
-    .isVisible()
-    .catch(() => false);
-  const invalid = await page.locator('[aria-invalid="true"]').count().catch(() => 0);
-  if (!submitStillThere && invalid === 0 && !/required|please (fix|complete|select)/i.test(bodyText)) {
-    // Soft signal only when the page clearly changed away from an apply form heading.
-    if (/application (submitted|received)|thank/i.test(bodyText)) return true;
-  }
   return false;
 }
 
@@ -347,9 +387,6 @@ export async function submitWithPlaywright(input: SubmissionInput): Promise<Subm
       };
     }
 
-    // Resume first — some forms auto-parse it and prefill fields, which we then
-    // overwrite with our own answers. File inputs are often visually hidden, so no
-    // visibility check.
     if (resumePath) {
       const fileInput = page.locator('input[type="file"]').first();
       if ((await fileInput.count()) > 0) {
@@ -417,24 +454,40 @@ export async function submitWithPlaywright(input: SubmissionInput): Promise<Subm
         await page
           .waitForURL(CONFIRMATION_URL, { timeout: 20_000 })
           .catch(() => page.waitForTimeout(8_000));
+        await dismissOverlays(page);
+
         const confirmed = await detectConfirmation(page);
         await page.screenshot({ path: screenshotPath, fullPage: true });
-        return confirmed
-          ? {
-              status: "submitted",
-              detail: "Application submitted and confirmation detected.",
-              filledLabels,
-              unfilledLabels,
-              screenshotPath,
-            }
-          : {
-              status: "needs_attention",
-              detail:
-                "Submit was clicked but no confirmation was detected — verify manually via the screenshot.",
-              filledLabels,
-              unfilledLabels,
-              screenshotPath,
-            };
+
+        if (confirmed) {
+          return {
+            status: "submitted",
+            detail: "Application submitted and confirmation detected.",
+            filledLabels,
+            unfilledLabels,
+            screenshotPath,
+          };
+        }
+
+        if (await submitStillVisible(page)) {
+          return {
+            status: "needs_attention",
+            detail:
+              "Submit was clicked but the application form is still open (validation likely failed — often an unselected location autocomplete or Yes/No). Check the screenshot and fix the highlighted fields.",
+            filledLabels,
+            unfilledLabels,
+            screenshotPath,
+          };
+        }
+
+        return {
+          status: "needs_attention",
+          detail:
+            "Submit was clicked but no confirmation was detected — verify manually via the screenshot.",
+          filledLabels,
+          unfilledLabels,
+          screenshotPath,
+        };
       }
     }
     return {

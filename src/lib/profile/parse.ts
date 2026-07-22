@@ -27,13 +27,18 @@ export async function parseResume(resumeText: string): Promise<CandidateProfile>
 
 Rules:
 - Copy contact details exactly as written (email, phone, links).
-- workHistory must be ordered most-recent first.
+- workHistory: include EVERY role listed on the resume, ordered most-recent first.
+  Each entry needs company, title, startDate, endDate (null if current), location, description.
+  Descriptions should be 2-4 sentences summarizing that role from the resume bullets.
+  If the resume has experience sections, workHistory MUST NOT be an empty array.
+- education: include EVERY school/degree listed. Use null for unknown subfields.
+  If the resume lists education, education MUST NOT be an empty array.
 - For links, include full URLs when present in the resume.
-- For unknown optional fields, return null (every key must be present). Do not invent anything.
+- For unknown optional scalar fields, return null (every key must be present). Do not invent employers or degrees that are not on the resume.
 - workAuthorization: resumes rarely state this. Unless the resume says otherwise, set
   authorizedToWorkInUS=true and requiresSponsorship=true (the user corrects it in the UI).
 - availableFrom: always null (the user sets availability in the profile UI; do not guess).
-- skills: a flat list of concrete technical and professional skills.
+- skills: a flat list of concrete technical and professional skills mentioned.
 - summary: write a 3-5 sentence professional summary in first person based on the resume.
 
 RESUME:

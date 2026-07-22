@@ -35,14 +35,22 @@ export async function uploadResumeAction(
       return { error: "Could not extract text from this PDF (is it a scan?)." };
     }
 
-    const parsed = await parseResume(resumeText);
+    let parsed = await parseResume(resumeText);
+    if (
+      parsed.workHistory.length === 0 &&
+      /\b(experience|employment|work history)\b/i.test(resumeText)
+    ) {
+      // Groq occasionally returns empty nested arrays; one retry usually fixes it.
+      parsed = await parseResume(resumeText);
+    }
 
-    // Work authorization and salary are user-stated settings, not resume facts —
+    // Work authorization / availability / salary are user-stated settings, not resume facts —
     // keep the existing values when re-parsing.
     const existing = await getProfileRow();
     if (existing) {
       parsed.workAuthorization = existing.data.workAuthorization;
       parsed.salaryExpectation = existing.data.salaryExpectation ?? parsed.salaryExpectation;
+      parsed.availableFrom = existing.data.availableFrom ?? parsed.availableFrom;
     }
 
     await mkdir(DATA_DIR, { recursive: true });
@@ -51,7 +59,13 @@ export async function uploadResumeAction(
 
     await saveProfile(parsed, { resumePath, resumeText });
     revalidatePath("/profile");
-    return { ok: "Resume parsed. Review the extracted profile below and fix anything that's off." };
+    const historyNote =
+      parsed.workHistory.length === 0
+        ? " Work history came back empty — fill it in the JSON box if needed."
+        : ` Extracted ${parsed.workHistory.length} role(s) and ${parsed.education.length} school(s).`;
+    return {
+      ok: `Resume parsed. Review the extracted profile below and fix anything that's off.${historyNote}`,
+    };
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
   }
