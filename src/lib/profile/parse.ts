@@ -3,8 +3,17 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { getModel, rateLimited } from "../llm";
 import { candidateProfileSchema, type CandidateProfile } from "./types";
 
-export async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
-  const pdf = await getDocumentProxy(new Uint8Array(buffer));
+/**
+ * PDF.js may transfer (detach) the ArrayBuffer it receives. Always copy first so
+ * callers can still write the original bytes to disk afterward.
+ */
+export async function extractPdfText(
+  data: ArrayBuffer | Uint8Array,
+): Promise<string> {
+  const source = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const copy = new Uint8Array(source.byteLength);
+  copy.set(source);
+  const pdf = await getDocumentProxy(copy);
   const { text } = await extractText(pdf, { mergePages: true });
   return text.trim();
 }

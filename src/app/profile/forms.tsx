@@ -31,8 +31,8 @@ export function ResumeUploadForm({ hasResume }: { hasResume: boolean }) {
       <h2 className="font-semibold text-zinc-900">Resume</h2>
       <p className="mt-1 text-sm text-zinc-500">
         {hasResume
-          ? "A resume is on file. Uploading a new one re-parses your profile."
-          : "Upload your resume (PDF). The AI extracts your profile; you review and correct it below."}
+          ? "A resume is on file. Uploading a new one re-parses your profile, including work history and education."
+          : "Upload your resume (PDF). The AI fills contact fields, skills, work history, and education — then you review and correct anything below."}
       </p>
       <div className="mt-3 flex items-center gap-3">
         <input type="file" name="resume" accept="application/pdf" className="text-sm" />
@@ -131,7 +131,9 @@ export function ProfileForm({ profile }: { profile: CandidateProfile }) {
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div>
-          <label className={labelCls}>Work history (JSON)</label>
+          <label className={labelCls}>
+            Work history (JSON) — filled automatically from your resume; edit if needed
+          </label>
           <textarea
             name="workHistory"
             rows={10}
@@ -140,7 +142,9 @@ export function ProfileForm({ profile }: { profile: CandidateProfile }) {
           />
         </div>
         <div>
-          <label className={labelCls}>Education (JSON)</label>
+          <label className={labelCls}>
+            Education (JSON) — filled automatically from your resume; edit if needed
+          </label>
           <textarea
             name="education"
             rows={10}
