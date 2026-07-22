@@ -75,10 +75,12 @@ export function resolveEeoAnswer(
 
   switch (topic) {
     case "gender":
-      return pickOption(field.options, [
-        defaults.gender === "male" ? /^male$/i : /^female$/i,
-        defaults.gender === "male" ? /\bmale\b/i : /\bfemale\b/i,
-      ]);
+      return pickOption(
+        field.options,
+        defaults.gender === "male"
+          ? [/^male$/i, /^man$/i, /\bmale\b/i]
+          : [/^female$/i, /^woman$/i, /\bfemale\b/i],
+      );
 
     case "hispanic":
       return pickOption(

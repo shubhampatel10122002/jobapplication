@@ -35,6 +35,14 @@ export async function uploadResumeAction(
 
     const parsed = await parseResume(resumeText);
 
+    // Work authorization and salary are user-stated settings, not resume facts —
+    // keep the existing values when re-parsing.
+    const existing = await getProfileRow();
+    if (existing) {
+      parsed.workAuthorization = existing.data.workAuthorization;
+      parsed.salaryExpectation = existing.data.salaryExpectation ?? parsed.salaryExpectation;
+    }
+
     await mkdir(DATA_DIR, { recursive: true });
     const resumePath = path.join(DATA_DIR, "resume.pdf");
     await writeFile(resumePath, Buffer.from(buffer));

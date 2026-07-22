@@ -38,6 +38,9 @@ export default function RootLayout({
             <Link href="/profile" className="text-zinc-600 hover:text-zinc-900">
               Profile
             </Link>
+            <Link href="/applications" className="text-zinc-600 hover:text-zinc-900">
+              Applications
+            </Link>
           </nav>
         </header>
         {children}

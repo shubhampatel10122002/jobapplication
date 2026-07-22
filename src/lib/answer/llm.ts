@@ -1,5 +1,5 @@
 import { generateObject, generateText } from "ai";
-import { getModel } from "../llm";
+import { getModel, rateLimited } from "../llm";
 import type { LlmAnswerFn, LlmQuestion } from "./engine";
 
 function contextBlock(q: LlmQuestion): string {
@@ -25,15 +25,17 @@ ${q.knowledgeBase.length > 0 ? q.knowledgeBase.map((k) => `- ${k}`).join("\n") :
  */
 export const llmAnswer: LlmAnswerFn = async (q) => {
   if (q.optionLabels && q.optionLabels.length > 0) {
-    const { object } = await generateObject({
-      model: getModel(),
-      output: "enum",
-      enum: q.optionLabels,
-      prompt: `${contextBlock(q)}
+    const { object } = await rateLimited(() =>
+      generateObject({
+        model: getModel(),
+        output: "enum",
+        enum: q.optionLabels!,
+        prompt: `${contextBlock(q)}
 
 APPLICATION QUESTION (choose exactly one of the allowed options):
 ${q.label}`,
-    });
+      }),
+    );
     return object;
   }
 
@@ -42,15 +44,17 @@ ${q.label}`,
       ? "Answer in 2-6 sentences (at most ~150 words). Be specific and concrete, not generic."
       : "Answer in a single short line (a few words, a number, or one sentence).";
 
-  const { text } = await generateText({
-    model: getModel(),
-    prompt: `${contextBlock(q)}
+  const { text } = await rateLimited(() =>
+    generateText({
+      model: getModel(),
+      prompt: `${contextBlock(q)}
 
 APPLICATION QUESTION:
 ${q.label}
 
 ${lengthHint}
 Return ONLY the answer text itself — no preamble, no quotes, no markdown.`,
-  });
+    }),
+  );
   return text.trim();
 };
