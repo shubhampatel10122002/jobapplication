@@ -38,6 +38,24 @@ function AnswerControl({ item }: { item: AnswerItem }) {
       </p>
     );
   }
+  // Boolean widgets on ATS boards are Yes/No buttons — mirror that in review.
+  if (item.type === "boolean") {
+    const current =
+      item.valueLabel && /^(yes|no)$/i.test(item.valueLabel)
+        ? item.valueLabel[0].toUpperCase() + item.valueLabel.slice(1).toLowerCase()
+        : /^(true|yes)$/i.test(item.value ?? "")
+          ? "Yes"
+          : /^(false|no)$/i.test(item.value ?? "")
+            ? "No"
+            : "";
+    return (
+      <select name={name} defaultValue={current} className={inputCls}>
+        <option value="">— not answered —</option>
+        <option value="Yes">Yes</option>
+        <option value="No">No</option>
+      </select>
+    );
+  }
   if (item.options.length > 0) {
     return (
       <select name={name} defaultValue={item.value ?? ""} className={inputCls}>
@@ -53,6 +71,16 @@ function AnswerControl({ item }: { item: AnswerItem }) {
   if (item.type === "textarea") {
     return (
       <textarea name={name} rows={4} defaultValue={item.value ?? ""} className={inputCls} />
+    );
+  }
+  if (item.type === "date") {
+    return (
+      <input
+        name={name}
+        type="date"
+        defaultValue={item.value ?? ""}
+        className={inputCls}
+      />
     );
   }
   return <input name={name} defaultValue={item.value ?? ""} className={inputCls} />;

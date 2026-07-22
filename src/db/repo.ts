@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import type { AnswerCacheStore } from "@/lib/answer/engine";
 import { EEO_DEFAULTS } from "@/lib/profile/eeo";
 import type { CandidateProfile } from "@/lib/profile/types";
+import { normalizeProfile } from "@/lib/profile/types";
 import { db } from "./index";
 import { answerCache, profile } from "./schema";
 
@@ -20,7 +21,7 @@ export async function getProfileRow(): Promise<ProfileRow | null> {
   const row = rows[0];
   return {
     id: row.id,
-    data: row.data as CandidateProfile,
+    data: normalizeProfile(row.data as CandidateProfile),
     knowledgeBase: (row.knowledgeBase as string[]) ?? [],
     resumePath: row.resumePath,
     resumeText: row.resumeText,

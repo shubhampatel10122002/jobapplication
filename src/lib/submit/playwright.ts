@@ -29,7 +29,14 @@ const SUBMIT_BUTTON_SELECTORS = [
   'button[type="submit"]:has-text("Submit")',
   'button:has-text("Submit application")',
   'button:has-text("Submit Application")',
+  'button:has-text("Submit")',
 ];
+
+const CONFIRMATION_URL =
+  /confirmation|thanks?|thank-you|success|submitted|complete|received|done|appl(y|ication).*(sent|received)/i;
+
+const CONFIRMATION_TEXT =
+  /(thank(s| you).{0,40}appl|we('ve| have) received.{0,40}appl|application (has been |was )?(submitted|received|sent)|successfully submitted|your application (is|was) (in|submitted)|application received)/i;
 
 async function visibleCaptcha(page: Page): Promise<boolean> {
   // The reCAPTCHA v3 corner badge (.grecaptcha-badge) is not a challenge — invisible
@@ -110,7 +117,7 @@ async function findFieldContainer(page: Page, answer: ResolvedAnswer): Promise<L
   if (!label) return null;
   // Walk up from the label until an ancestor contains an interactive widget.
   let container = label.locator("xpath=..");
-  for (let depth = 0; depth < 3; depth++) {
+  for (let depth = 0; depth < 4; depth++) {
     const widgets = container.locator(
       'input:not([type=hidden]), textarea, select, button, [role="radio"], [role="combobox"]',
     );
@@ -130,13 +137,42 @@ async function pickComboOption(page: Page, text: string): Promise<void> {
   }
 }
 
+function displayText(answer: ResolvedAnswer): string {
+  return (answer.valueLabel ?? answer.value).trim();
+}
+
+function bareYesNo(answer: ResolvedAnswer): "Yes" | "No" | null {
+  const text = displayText(answer);
+  if (/^(y|yes|true|1)$/i.test(text) || (/^y/i.test(text) && answer.field.type === "boolean")) {
+    return "Yes";
+  }
+  if (/^(n|no|false|0)$/i.test(text) || (/^n/i.test(text) && answer.field.type === "boolean")) {
+    return "No";
+  }
+  // Sentence answers from older LLM runs: "Yes, I am authorized..."
+  if (answer.field.type === "boolean") {
+    if (/\byes\b/i.test(text) && !/\bno\b/i.test(text)) return "Yes";
+    if (/\bno\b/i.test(text)) return "No";
+  }
+  return null;
+}
+
 async function fillControl(page: Page, control: Locator, answer: ResolvedAnswer): Promise<boolean> {
   const tag = (await control.evaluate((el) => el.tagName)).toLowerCase();
-  const text = answer.valueLabel ?? answer.value;
+  const text = displayText(answer);
 
   if (tag === "select") {
-    await control.selectOption({ label: text });
-    return true;
+    try {
+      await control.selectOption({ label: text });
+      return true;
+    } catch {
+      try {
+        await control.selectOption({ value: answer.value });
+        return true;
+      } catch {
+        return false;
+      }
+    }
   }
 
   const role = await control.getAttribute("role");
@@ -153,10 +189,21 @@ async function fillControl(page: Page, control: Locator, answer: ResolvedAnswer)
   if (tag === "input" || tag === "textarea") {
     const type = (await control.getAttribute("type")) ?? "text";
     if (type === "checkbox") {
-      if (/^(yes|true|1|on)$/i.test(answer.value)) await control.check();
+      if (/^(yes|true|1|on)$/i.test(answer.value) || bareYesNo(answer) === "Yes") {
+        await control.check();
+      }
       return true;
     }
     if (type === "radio") return false; // handled via container
+    if (type === "date") {
+      // Native date inputs want YYYY-MM-DD.
+      const iso = /^\d{4}-\d{2}-\d{2}$/.test(answer.value) ? answer.value : text;
+      await control.fill(iso);
+      return true;
+    }
+    // Don't dump Yes/No prose into a text box when this is a boolean field —
+    // let the widget-group path click the real button.
+    if (answer.field.type === "boolean") return false;
     await control.fill(answer.value);
     return true;
   }
@@ -169,12 +216,8 @@ async function fillWidgetGroup(
   container: Locator,
   answer: ResolvedAnswer,
 ): Promise<boolean> {
-  let text = answer.valueLabel ?? answer.value;
-  // Boolean widgets want a bare Yes/No, even when the LLM answered a full sentence.
-  if (answer.field.type === "boolean") {
-    if (/^y/i.test(text)) text = "Yes";
-    else if (/^n/i.test(text)) text = "No";
-  }
+  const yesNo = bareYesNo(answer);
+  const text = yesNo ?? displayText(answer);
 
   const radio = container.getByRole("radio", { name: text, exact: false }).first();
   if ((await radio.count()) > 0) {
@@ -190,7 +233,7 @@ async function fillWidgetGroup(
     return true;
   }
 
-  if (answer.field.type === "boolean" || /^(yes|no)$/i.test(text)) {
+  if (answer.field.type === "boolean" || yesNo || /^(yes|no)$/i.test(text)) {
     const button = container
       .getByRole("button", { name: new RegExp(`^${text}$`, "i") })
       .first();
@@ -203,14 +246,79 @@ async function fillWidgetGroup(
   // Consent/acknowledgement style fields: a single checkbox under the label. Check it
   // unless the answer is explicitly negative (the user reviewed the answer already).
   const checkboxes = container.locator('input[type="checkbox"]');
-  if ((await checkboxes.count()) === 1 && !/^(no|false|0)$/i.test(answer.value.trim())) {
+  if ((await checkboxes.count()) === 1 && bareYesNo(answer) !== "No") {
     await checkboxes.first().check({ force: true });
     return true;
   }
 
-  const innerInput = container.locator("input:not([type=hidden]), textarea").first();
-  if ((await innerInput.count()) > 0) {
+  // Date pickers: try a native date input inside the group.
+  if (answer.field.type === "date") {
+    const dateInput = container.locator('input[type="date"]').first();
+    if ((await dateInput.count()) > 0) {
+      await dateInput.fill(answer.value);
+      return true;
+    }
+    const anyInput = container.locator("input:not([type=hidden])").first();
+    if ((await anyInput.count()) > 0) {
+      await anyInput.click();
+      await anyInput.fill(displayText(answer));
+      await page.keyboard.press("Enter").catch(() => {});
+      return true;
+    }
+  }
+
+  const innerInput = container.locator("input:not([type=hidden]), textarea, select").first();
+  if ((await innerInput.count()) > 0 && answer.field.type !== "boolean") {
     return fillControl(page, innerInput, answer);
+  }
+  return false;
+}
+
+async function fillAnswer(page: Page, answer: ResolvedAnswer): Promise<boolean> {
+  // Boolean / custom widgets: prefer the labeled container so we click Yes/No
+  // buttons instead of typing into a nearby text control.
+  if (answer.field.type === "boolean" || answer.field.type === "select" || answer.field.type === "date") {
+    const container = await findFieldContainer(page, answer);
+    if (container) {
+      const done = await fillWidgetGroup(page, container, answer);
+      if (done) return true;
+    }
+  }
+
+  const control = await findControl(page, answer);
+  if (control) {
+    const done = await fillControl(page, control, answer);
+    if (done) return true;
+  }
+
+  const container = await findFieldContainer(page, answer);
+  if (container) return fillWidgetGroup(page, container, answer);
+  return false;
+}
+
+async function detectConfirmation(page: Page): Promise<boolean> {
+  if (CONFIRMATION_URL.test(page.url())) return true;
+
+  const bodyText = (await page.locator("body").innerText().catch(() => "")).slice(0, 8_000);
+  if (CONFIRMATION_TEXT.test(bodyText)) return true;
+
+  const visible = await page
+    .locator(`:text-matches("${CONFIRMATION_TEXT.source}", "i")`)
+    .first()
+    .isVisible()
+    .catch(() => false);
+  if (visible) return true;
+
+  // SPA success: submit controls gone and no obvious validation errors left.
+  const submitStillThere = await page
+    .locator(SUBMIT_BUTTON_SELECTORS.join(", "))
+    .first()
+    .isVisible()
+    .catch(() => false);
+  const invalid = await page.locator('[aria-invalid="true"]').count().catch(() => 0);
+  if (!submitStillThere && invalid === 0 && !/required|please (fix|complete|select)/i.test(bodyText)) {
+    // Soft signal only when the page clearly changed away from an apply form heading.
+    if (/application (submitted|received)|thank/i.test(bodyText)) return true;
   }
   return false;
 }
@@ -257,13 +365,7 @@ export async function submitWithPlaywright(input: SubmissionInput): Promise<Subm
     for (const answer of answers) {
       if (answer.field.type === "file") continue;
       try {
-        let done = false;
-        const control = await findControl(page, answer);
-        if (control) done = await fillControl(page, control, answer);
-        if (!done) {
-          const container = await findFieldContainer(page, answer);
-          if (container) done = await fillWidgetGroup(page, container, answer);
-        }
+        const done = await fillAnswer(page, answer);
         (done ? filledLabels : unfilledLabels).push(answer.field.label);
       } catch {
         unfilledLabels.push(answer.field.label);
@@ -313,15 +415,9 @@ export async function submitWithPlaywright(input: SubmissionInput): Promise<Subm
       if ((await button.count()) > 0 && (await button.isVisible().catch(() => false))) {
         await button.click();
         await page
-          .waitForURL(/confirmation|thanks|thank/i, { timeout: 20_000 })
+          .waitForURL(CONFIRMATION_URL, { timeout: 20_000 })
           .catch(() => page.waitForTimeout(8_000));
-        const confirmed =
-          /confirmation|thanks|thank/i.test(page.url()) ||
-          (await page
-            .locator(':text-matches("(application (was )?(submitted|received)|thank you for applying)", "i")')
-            .first()
-            .isVisible()
-            .catch(() => false));
+        const confirmed = await detectConfirmation(page);
         await page.screenshot({ path: screenshotPath, fullPage: true });
         return confirmed
           ? {

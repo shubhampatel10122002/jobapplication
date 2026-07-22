@@ -40,6 +40,8 @@ export const candidateProfileSchema = z.object({
     requiresSponsorship: z.boolean(),
     visaStatus: z.string().nullable().describe("e.g. F-1 OPT, H-1B, citizen"),
   }),
+  /** Earliest start / availability, e.g. "2026-08-01" or "2 weeks notice" — user-stated, not from resume. */
+  availableFrom: z.string().nullable(),
   salaryExpectation: z.string().nullable(),
   summary: z.string().nullable().describe("3-5 sentence professional summary"),
   skills: z.array(z.string()),
@@ -61,9 +63,27 @@ export const EMPTY_PROFILE: CandidateProfile = {
     requiresSponsorship: true,
     visaStatus: null,
   },
+  availableFrom: null,
   salaryExpectation: null,
   summary: null,
   skills: [],
   workHistory: [],
   education: [],
 };
+
+/** Merge stored JSON with defaults so older profiles gain new fields safely. */
+export function normalizeProfile(data: Partial<CandidateProfile> | null | undefined): CandidateProfile {
+  const d = data ?? {};
+  return {
+    ...EMPTY_PROFILE,
+    ...d,
+    links: { ...EMPTY_PROFILE.links, ...(d.links ?? {}) },
+    workAuthorization: {
+      ...EMPTY_PROFILE.workAuthorization,
+      ...(d.workAuthorization ?? {}),
+    },
+    skills: d.skills ?? [],
+    workHistory: d.workHistory ?? [],
+    education: d.education ?? [],
+  };
+}

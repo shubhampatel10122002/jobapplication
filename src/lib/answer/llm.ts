@@ -7,6 +7,10 @@ function contextBlock(q: LlmQuestion): string {
 based ONLY on the candidate profile and knowledge base below. Write in first person as
 the candidate. Never invent experience, credentials, or personal details.
 
+If the profile and knowledge base do not contain enough information to answer, reply with
+exactly the single token UNKNOWN (nothing else). Do NOT write meta comments like
+"not mentioned in the profile" or "I don't know".
+
 JOB: ${q.jobTitle} at ${q.companyName}
 
 JOB DESCRIPTION (truncated):
@@ -21,7 +25,7 @@ ${q.knowledgeBase.length > 0 ? q.knowledgeBase.map((k) => `- ${k}`).join("\n") :
 
 /**
  * Real LLM implementation of the answer engine's LlmAnswerFn.
- * Select questions are constrained to the exact option labels via enum output.
+ * Select / boolean questions are constrained to the exact option labels via enum output.
  */
 export const llmAnswer: LlmAnswerFn = async (q) => {
   if (q.optionLabels && q.optionLabels.length > 0) {
@@ -33,7 +37,10 @@ export const llmAnswer: LlmAnswerFn = async (q) => {
         prompt: `${contextBlock(q)}
 
 APPLICATION QUESTION (choose exactly one of the allowed options):
-${q.label}`,
+${q.label}
+
+If you cannot choose from the options based on the profile, pick the safest honest option
+that matches the profile (e.g. work-authorization Yes/No from workAuthorization).`,
       }),
     );
     return object;
@@ -42,7 +49,9 @@ ${q.label}`,
   const lengthHint =
     q.type === "textarea"
       ? "Answer in 2-6 sentences (at most ~150 words). Be specific and concrete, not generic."
-      : "Answer in a single short line (a few words, a number, or one sentence).";
+      : q.type === "date"
+        ? "Answer as a calendar date in YYYY-MM-DD format only (or UNKNOWN)."
+        : "Answer in a single short line (a few words or a number). No full sentences unless required.";
 
   const { text } = await rateLimited(() =>
     generateText({
@@ -53,7 +62,7 @@ APPLICATION QUESTION:
 ${q.label}
 
 ${lengthHint}
-Return ONLY the answer text itself — no preamble, no quotes, no markdown.`,
+Return ONLY the answer text itself — no preamble, no quotes, no markdown. If unknown: UNKNOWN.`,
     }),
   );
   return text.trim();

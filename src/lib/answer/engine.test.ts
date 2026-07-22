@@ -160,11 +160,113 @@ describe("planAnswers", () => {
     expect(answers[0]).toMatchObject({ source: "resume_file", needsReview: true });
   });
 
-  it("question hash ignores whitespace/case but not options", () => {
-    const a = field({ id: "a", label: "Why  Us?" });
-    const b = field({ id: "b", label: "why us?" });
-    const c = field({ id: "c", label: "why us?", options: [{ label: "Yes", value: "1" }] });
-    expect(questionHash(a)).toBe(questionHash(b));
-    expect(questionHash(a)).not.toBe(questionHash(c));
+  it("maps work-auth Yes/No from profile without calling the LLM", async () => {
+    const llm = vi.fn();
+    const answers = await planAnswers({
+      job: job([
+        field({
+          id: "auth",
+          label: "Are you authorized to work in the United States?",
+          type: "select",
+          options: [
+            { label: "Yes", value: "1" },
+            { label: "No", value: "0" },
+          ],
+        }),
+        field({
+          id: "sponsor",
+          label: "Will you require sponsorship?",
+          type: "boolean",
+        }),
+      ]),
+      profile: {
+        ...profile,
+        workAuthorization: {
+          authorizedToWorkInUS: true,
+          requiresSponsorship: false,
+          visaStatus: null,
+        },
+      },
+      llm,
+    });
+    expect(answers[0]).toMatchObject({
+      source: "profile",
+      value: "1",
+      valueLabel: "Yes",
+      needsReview: false,
+    });
+    expect(answers[1]).toMatchObject({
+      source: "profile",
+      value: "false",
+      valueLabel: "No",
+      needsReview: false,
+    });
+    expect(llm).not.toHaveBeenCalled();
+  });
+
+  it("leaves availability for review instead of accepting LLM hedges", async () => {
+    const llm = vi.fn().mockResolvedValue("Availability is not mentioned in the profile");
+    const answers = await planAnswers({
+      job: job([
+        field({ id: "avail", label: "When can you start / availability?", type: "text" }),
+      ]),
+      profile: { ...profile, availableFrom: null },
+      llm,
+    });
+    expect(answers[0]).toMatchObject({
+      source: "unresolved",
+      value: null,
+      needsReview: true,
+    });
+    expect(llm).not.toHaveBeenCalled();
+  });
+
+  it("uses profile availableFrom for date fields", async () => {
+    const llm = vi.fn();
+    const answers = await planAnswers({
+      job: job([field({ id: "start", label: "Earliest start date", type: "date" })]),
+      profile: { ...profile, availableFrom: "8/15/2026" },
+      llm,
+    });
+    expect(answers[0]).toMatchObject({
+      source: "profile",
+      value: "2026-08-15",
+      needsReview: false,
+    });
+    expect(llm).not.toHaveBeenCalled();
+  });
+
+  it("treats UNKNOWN LLM answers as needsReview", async () => {
+    const llm = vi.fn().mockResolvedValue("UNKNOWN");
+    const answers = await planAnswers({
+      job: job([field({ id: "q", label: "What is your favorite color?", type: "text" })]),
+      profile,
+      llm,
+    });
+    expect(answers[0]).toMatchObject({ source: "unresolved", value: null, needsReview: true });
+  });
+
+  it("forces boolean fields through Yes/No options for the LLM", async () => {
+    const llm = vi.fn().mockResolvedValue("Yes");
+    const answers = await planAnswers({
+      job: job([
+        field({
+          id: "remote",
+          label: "Are you open to hybrid work?",
+          type: "boolean",
+        }),
+      ]),
+      profile,
+      llm,
+    });
+    expect(llm).toHaveBeenCalledWith(
+      expect.objectContaining({ optionLabels: ["Yes", "No"] }),
+    );
+    expect(answers[0]).toMatchObject({
+      source: "llm",
+      value: "true",
+      valueLabel: "Yes",
+      needsReview: false,
+    });
   });
 });

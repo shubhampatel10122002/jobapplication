@@ -98,6 +98,15 @@ export function ProfileForm({ profile }: { profile: CandidateProfile }) {
             className={inputCls}
           />
         </div>
+        <div>
+          <label className={labelCls}>Available from / earliest start</label>
+          <input
+            name="availableFrom"
+            defaultValue={p.availableFrom ?? ""}
+            placeholder="e.g. 2026-08-01 or 2 weeks notice"
+            className={inputCls}
+          />
+        </div>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-6 text-sm text-zinc-700">

@@ -2,12 +2,16 @@ import { createHash } from "node:crypto";
 import type { NormalizedField, NormalizedJob } from "../ats/types";
 import { resolveEeoAnswer, type EeoDefaults, EEO_DEFAULTS } from "../profile/eeo";
 import type { CandidateProfile } from "../profile/types";
-import { resolveProfileAnswer } from "./deterministic";
+import {
+  isUnknownOrHedgeAnswer,
+  normalizeDateAnswer,
+  resolveDeterministicAnswer,
+} from "./deterministic";
 
 export interface LlmQuestion {
   label: string;
   type: NormalizedField["type"];
-  /** For select questions: the option labels the answer MUST be one of. */
+  /** For select / boolean questions: the option labels the answer MUST be one of. */
   optionLabels?: string[];
   jobTitle: string;
   companyName: string;
@@ -37,7 +41,9 @@ export interface PlannedAnswer {
 }
 
 export function questionHash(field: NormalizedField): string {
+  // Bump prefix when answer semantics change so stale LLM hedges are not reused.
   const normalized = [
+    "v2",
     field.label.toLowerCase().replace(/\s+/g, " ").trim(),
     field.type,
     ...field.options.map((o) => o.label.toLowerCase()),
@@ -53,7 +59,23 @@ function selectValueForLabel(
     (o) => o.label.trim().toLowerCase() === answerLabel.trim().toLowerCase(),
   );
   if (exact) return { value: exact.value, label: exact.label };
+  // Yes/No soft match for boolean-like selects.
+  const want = /^y/i.test(answerLabel.trim())
+    ? "yes"
+    : /^n/i.test(answerLabel.trim())
+      ? "no"
+      : null;
+  if (want) {
+    const soft = field.options.find((o) => o.label.trim().toLowerCase().startsWith(want));
+    if (soft) return { value: soft.value, label: soft.label };
+  }
   return null;
+}
+
+function effectiveOptionLabels(field: NormalizedField): string[] | undefined {
+  if (field.options.length > 0) return field.options.map((o) => o.label);
+  if (field.type === "boolean") return ["Yes", "No"];
+  return undefined;
 }
 
 export interface PlanAnswersOptions {
@@ -70,9 +92,9 @@ export interface PlanAnswersOptions {
  * Produce an answer for every field of the application form:
  *  - files            -> resume upload, handled at submission time
  *  - EEO/demographic  -> fixed defaults, never guessed
- *  - identity fields  -> deterministic from profile
- *  - everything else  -> LLM (with cache), constrained to options for selects
- * Anything unresolvable is flagged needsReview instead of being guessed.
+ *  - identity / work-auth / availability -> deterministic from profile
+ *  - everything else  -> LLM (with cache), constrained to options for selects/booleans
+ * Anything unresolvable or hedged is flagged needsReview instead of being guessed.
  */
 export async function planAnswers({
   job,
@@ -92,7 +114,6 @@ export async function planAnswers({
         source: "resume_file",
         value: isResume ? "[resume file]" : null,
         valueLabel: isResume ? "Attached resume" : null,
-        // Non-resume files (e.g. required cover letter uploads) need the user.
         needsReview: !isResume && field.required,
       });
       continue;
@@ -110,15 +131,57 @@ export async function planAnswers({
       continue;
     }
 
-    // Always try deterministic resolution first, regardless of how the field was
-    // classified — free-text questions like "Who is your current employer?" are
-    // classified as LLM but resolvable straight from the profile.
-    if (field.options.length === 0) {
-      const value = resolveProfileAnswer(field, profile);
-      if (value) {
-        planned.push({ field, source: "profile", value, valueLabel: value, needsReview: false });
+    // Work-auth Yes/No + identity fields — never invent via LLM.
+    const deterministic = resolveDeterministicAnswer(field, profile);
+    if (deterministic) {
+      if (field.type === "date") {
+        const normalized = normalizeDateAnswer(deterministic.value);
+        planned.push({
+          field,
+          source: "profile",
+          value: normalized ?? deterministic.value,
+          valueLabel: normalized ?? deterministic.label,
+          needsReview: !normalized,
+        });
+      } else {
+        planned.push({
+          field,
+          source: "profile",
+          value: deterministic.value,
+          valueLabel: deterministic.label,
+          needsReview: false,
+        });
+      }
+      continue;
+    }
+
+    // Availability/date with no profile value → user must fill; do not ask the LLM to hedge.
+    if (
+      field.type === "date" ||
+      /\b(availab(le|ility)|earliest start|start date|when can you (start|begin)|available to start)\b/i.test(
+        field.label,
+      )
+    ) {
+      if (!profile.availableFrom) {
+        planned.push({
+          field,
+          source: "unresolved",
+          value: null,
+          valueLabel: null,
+          needsReview: true,
+        });
         continue;
       }
+      const normalized =
+        field.type === "date" ? normalizeDateAnswer(profile.availableFrom) : profile.availableFrom;
+      planned.push({
+        field,
+        source: "profile",
+        value: normalized ?? profile.availableFrom,
+        valueLabel: normalized ?? profile.availableFrom,
+        needsReview: field.type === "date" && !normalized,
+      });
+      continue;
     }
 
     if (!llm) {
@@ -139,7 +202,7 @@ export async function planAnswers({
       answerText = await llm({
         label: field.label,
         type: field.type,
-        optionLabels: field.options.length > 0 ? field.options.map((o) => o.label) : undefined,
+        optionLabels: effectiveOptionLabels(field),
         jobTitle: job.title,
         companyName: job.companyName,
         jobDescription: job.descriptionText,
@@ -149,26 +212,60 @@ export async function planAnswers({
       if (cache) await cache.set(hash, field.label, answerText);
     }
 
-    if (field.options.length > 0) {
-      const resolved = selectValueForLabel(field, answerText);
+    if (isUnknownOrHedgeAnswer(answerText)) {
+      planned.push({
+        field,
+        source: "unresolved",
+        value: null,
+        valueLabel: null,
+        needsReview: true,
+        fromCache,
+      });
+      continue;
+    }
+
+    const optionLabels = effectiveOptionLabels(field);
+    if (optionLabels) {
+      const resolved =
+        field.options.length > 0
+          ? selectValueForLabel(field, answerText)
+          : /^y/i.test(answerText.trim())
+            ? { value: "true", label: "Yes" }
+            : /^n/i.test(answerText.trim())
+              ? { value: "false", label: "No" }
+              : null;
       planned.push({
         field,
         source: resolved ? "llm" : "unresolved",
         value: resolved?.value ?? null,
-        valueLabel: resolved?.label ?? answerText,
+        valueLabel: resolved?.label ?? null,
         needsReview: !resolved,
         fromCache,
       });
-    } else {
+      continue;
+    }
+
+    if (field.type === "date") {
+      const normalized = normalizeDateAnswer(answerText);
       planned.push({
         field,
-        source: "llm",
-        value: answerText,
-        valueLabel: answerText,
-        needsReview: false,
+        source: normalized ? "llm" : "unresolved",
+        value: normalized,
+        valueLabel: normalized,
+        needsReview: !normalized,
         fromCache,
       });
+      continue;
     }
+
+    planned.push({
+      field,
+      source: "llm",
+      value: answerText,
+      valueLabel: answerText,
+      needsReview: false,
+      fromCache,
+    });
   }
 
   return planned;

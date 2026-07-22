@@ -86,7 +86,22 @@ export async function saveAnswersAction(
       const current = row.answer ?? "";
       if (trimmed === current) continue;
 
+      const fieldMeta = detail.job.formFields.find((f) => f.id === row.fieldId);
       const options = optionsByFieldId.get(row.fieldId) ?? [];
+
+      if (fieldMeta?.type === "boolean" || row.fieldType === "boolean") {
+        const yes = /^y/i.test(trimmed);
+        const no = /^n/i.test(trimmed);
+        if (!yes && !no && trimmed !== "") continue;
+        await updateAnswerValue(
+          applicationId,
+          row.id,
+          trimmed === "" ? "" : yes ? "true" : "false",
+          trimmed === "" ? null : yes ? "Yes" : "No",
+        );
+        continue;
+      }
+
       const option = options.find((o) => o.value === trimmed);
       await updateAnswerValue(
         applicationId,

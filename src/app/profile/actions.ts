@@ -87,6 +87,7 @@ export async function saveProfileAction(
         requiresSponsorship: formData.get("requiresSponsorship") === "on",
         visaStatus: str("visaStatus"),
       },
+      availableFrom: str("availableFrom"),
       salaryExpectation: str("salaryExpectation"),
       summary: str("summary"),
       skills: (str("skills") ?? "")

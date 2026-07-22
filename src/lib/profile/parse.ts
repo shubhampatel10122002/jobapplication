@@ -32,6 +32,7 @@ Rules:
 - For unknown optional fields, return null (every key must be present). Do not invent anything.
 - workAuthorization: resumes rarely state this. Unless the resume says otherwise, set
   authorizedToWorkInUS=true and requiresSponsorship=true (the user corrects it in the UI).
+- availableFrom: always null (the user sets availability in the profile UI; do not guess).
 - skills: a flat list of concrete technical and professional skills.
 - summary: write a 3-5 sentence professional summary in first person based on the resume.
 

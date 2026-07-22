@@ -76,6 +76,8 @@ function mapType(t: string): FieldType {
       return "file";
     case "Boolean":
       return "boolean";
+    case "Date":
+      return "date";
     case "ValueSelect":
       return "select";
     case "MultiValueSelect":
