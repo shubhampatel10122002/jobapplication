@@ -20,7 +20,7 @@ Rules:
 - Copy contact details exactly as written (email, phone, links).
 - workHistory must be ordered most-recent first.
 - For links, include full URLs when present in the resume.
-- Leave fields null/empty when the resume does not mention them. Do not invent anything.
+- For unknown optional fields, return null (every key must be present). Do not invent anything.
 - workAuthorization: resumes rarely state this. Unless the resume says otherwise, set
   authorizedToWorkInUS=true and requiresSponsorship=true (the user corrects it in the UI).
 - skills: a flat list of concrete technical and professional skills.
