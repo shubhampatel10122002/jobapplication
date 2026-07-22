@@ -47,9 +47,10 @@ export function resolveProfileAnswer(
   field: Pick<NormalizedField, "id" | "label" | "type">,
   profile: CandidateProfile,
 ): string | null {
-  const haystack = `${field.label} ${field.id}`.replace(/_/g, " ");
+  // Label and id are tested separately so anchored patterns (^location$) work.
+  const haystacks = [field.label, field.id.replace(/_/g, " ")];
   for (const { match, resolve } of RESOLVERS) {
-    if (match.test(haystack)) {
+    if (haystacks.some((h) => match.test(h))) {
       const value = resolve(profile);
       if (value) return value;
       return null;

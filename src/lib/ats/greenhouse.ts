@@ -22,6 +22,15 @@ interface GhQuestion {
   fields: GhField[];
 }
 
+/** Demographic survey questions use a different shape than regular questions. */
+interface GhDemographicQuestion {
+  id: number;
+  label: string;
+  required: boolean | null;
+  type: string;
+  answer_options: { id: number; label: string }[];
+}
+
 interface GhJobResponse {
   id: number;
   title: string;
@@ -32,7 +41,7 @@ interface GhJobResponse {
   location_questions?: GhQuestion[];
   compliance?: { type: string; questions: GhQuestion[] }[];
   demographic_questions?: {
-    questions?: GhQuestion[];
+    questions?: GhDemographicQuestion[];
   } | null;
 }
 
@@ -117,7 +126,19 @@ export const greenhouseAdapter: AtsAdapter = {
       for (const q of block.questions ?? []) fields.push(...normalizeQuestion(q, "eeoc"));
     }
     for (const q of data.demographic_questions?.questions ?? []) {
-      fields.push(...normalizeQuestion(q, "demographic"));
+      const label = htmlToText(q.label);
+      fields.push({
+        id: `demographic_question_${q.id}`,
+        label,
+        type: q.type === "multi_value_multi_select" ? "multi_select" : "select",
+        required: q.required ?? false,
+        options: (q.answer_options ?? []).map((o) => ({
+          label: o.label,
+          value: String(o.id),
+        })),
+        section: "demographic",
+        answerSource: classifyAnswerSource(label, "demographic"),
+      });
     }
 
     return {

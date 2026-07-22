@@ -4,6 +4,7 @@ import { fetchJobFromUrl } from "@/lib/ats";
 import type { NormalizedField, NormalizedJob } from "@/lib/ats";
 import { checkEligibility, type EligibilityResult } from "@/lib/eligibility/filter";
 import { EMPTY_PROFILE } from "@/lib/profile/types";
+import { PrepareButton } from "./prepare-button";
 
 export const dynamic = "force-dynamic";
 
@@ -134,6 +135,8 @@ async function JobResult({ job }: { job: NormalizedJob }) {
       </div>
 
       <EligibilityBanner result={eligibility} />
+
+      <PrepareButton url={job.ref.url} />
 
       {sections.map(({ title, keys }) => {
         const fields = job.fields.filter((f) => keys.includes(f.section));

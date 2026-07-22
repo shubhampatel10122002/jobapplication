@@ -34,6 +34,16 @@ screening-question answers with an LLM before submitting.
 - **Answer engine** (`src/lib/answer/`) — deterministic profile mapping for identity
   fields, fixed EEO defaults, LLM answers (constrained to the exact options for select
   questions) with a Postgres-backed cache keyed on question hash + profile version.
+- **Apply flow** — "Prepare application" on the inspector generates every answer and
+  opens a review page where each answer is editable. One application per job, enforced
+  in the database (no duplicate applications, ever).
+- **Submission** (`src/lib/submit/`) — Playwright fills the real hosted form
+  (Greenhouse job-boards, Lever, Ashby incl. Yes/No buttons, radio groups, custom
+  selects, consent checkboxes) and screenshots it. **Dry-run by default**: it never
+  clicks submit until you set `AUTO_SUBMIT=1`. Custom career sites (e.g. Stripe) and
+  visible CAPTCHAs are flagged `needs_attention` instead of guessing.
+- **Application tracker** (`/applications`) — every application with status, the exact
+  answers given per question, and the form screenshot.
 
 ## Getting started
 
@@ -56,10 +66,19 @@ pnpm test:live   # + live smoke tests against real Greenhouse/Ashby/Lever boards
 
 1. ~~ATS adapters + eligibility filter + EEO defaults~~
 2. ~~Profile: resume upload + LLM parsing into a structured profile, knowledge base~~
-3. ~~Answer engine: LLM answers for screening questions, answer cache~~ (this milestone)
-4. Submission: Ashby/Greenhouse structured submit, Playwright fallback, audit trail
-   with per-question answers + confirmation screenshot
+3. ~~Answer engine: LLM answers for screening questions, answer cache~~
+4. ~~Submission: Playwright form filling with dry-run mode, review flow, tracker~~
+   (this milestone)
 5. Job discovery: poll tracked company boards for new matching postings
+
+## LLM quota notes (July 2026)
+
+Google's free tier now uses dynamic per-project quotas — fresh projects get ~20
+requests/day **per model**. One application uses ~5-15 LLM calls, so either enable
+billing on the project (Flash-class pricing makes a full application cost well under a
+cent) or switch models via `GEMINI_MODEL` / use Groq. Calls are automatically spaced
+(`LLM_MIN_INTERVAL_MS`, default 13s) to stay under free-tier per-minute limits, and
+repeated questions are served from the Postgres answer cache without any LLM call.
 
 ## Stack
 
