@@ -11,9 +11,18 @@ import type { LanguageModel } from "ai";
  *  - Optional: Groq (set LLM_PROVIDER=groq + GROQ_API_KEY + GROQ_MODEL) for faster
  *    open-weight models.
  */
+function activeProvider(): "groq" | "google" | null {
+  if (process.env.LLM_PROVIDER === "groq") {
+    return process.env.GROQ_API_KEY ? "groq" : null;
+  }
+  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) return "google";
+  // No explicit provider and no Google key — fall back to Groq when available.
+  if (process.env.GROQ_API_KEY) return "groq";
+  return null;
+}
+
 export function hasLlmKey(): boolean {
-  if (process.env.LLM_PROVIDER === "groq") return !!process.env.GROQ_API_KEY;
-  return !!process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  return activeProvider() !== null;
 }
 
 /**
@@ -25,7 +34,7 @@ let lastCallAt = 0;
 let queue: Promise<unknown> = Promise.resolve();
 
 export function rateLimited<T>(fn: () => Promise<T>): Promise<T> {
-  const defaultInterval = process.env.LLM_PROVIDER === "groq" ? 0 : 13_000;
+  const defaultInterval = activeProvider() === "groq" ? 0 : 13_000;
   const minInterval = Number(process.env.LLM_MIN_INTERVAL_MS ?? defaultInterval);
   const run = queue.then(async () => {
     const wait = lastCallAt + minInterval - Date.now();
@@ -38,20 +47,18 @@ export function rateLimited<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export function getModel(): LanguageModel {
-  if (process.env.LLM_PROVIDER === "groq") {
-    if (!process.env.GROQ_API_KEY) {
-      throw new Error("LLM_PROVIDER=groq but GROQ_API_KEY is not set");
-    }
+  const provider = activeProvider();
+  if (provider === "groq") {
     const groq = createGroq({ apiKey: process.env.GROQ_API_KEY });
     return groq(process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile");
   }
-  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    throw new Error(
-      "GOOGLE_GENERATIVE_AI_API_KEY is not set. Get a free key at https://aistudio.google.com/apikey",
-    );
+  if (provider === "google") {
+    const google = createGoogleGenerativeAI({
+      apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    });
+    return google(process.env.GEMINI_MODEL ?? "gemini-3.5-flash");
   }
-  const google = createGoogleGenerativeAI({
-    apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-  });
-  return google(process.env.GEMINI_MODEL ?? "gemini-3.5-flash");
+  throw new Error(
+    "No LLM key configured. Set GOOGLE_GENERATIVE_AI_API_KEY (free: https://aistudio.google.com/apikey) or GROQ_API_KEY.",
+  );
 }
