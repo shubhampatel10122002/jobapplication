@@ -38,6 +38,29 @@ function AnswerControl({ item }: { item: AnswerItem }) {
       </p>
     );
   }
+  if (item.type === "multi_select" && item.options.length > 0) {
+    const selected = new Set(
+      (item.value ?? "")
+        .split(";")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
+    return (
+      <div className="flex flex-wrap gap-x-5 gap-y-1.5 rounded-lg border border-zinc-300 px-3 py-2">
+        {item.options.map((o) => (
+          <label key={o.value} className="flex items-center gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              name={name}
+              value={o.value}
+              defaultChecked={selected.has(o.value)}
+            />
+            {o.label}
+          </label>
+        ))}
+      </div>
+    );
+  }
   if (item.options.length > 0) {
     return (
       <select name={name} defaultValue={item.value ?? ""} className={inputCls}>

@@ -23,8 +23,22 @@ const profile: CandidateProfile = {
   summary: null,
   skills: ["TypeScript"],
   workHistory: [
-    { company: "Acme Corp", title: "Software Engineer", startDate: "2024-01", endDate: null },
-    { company: "OldCo", title: "Intern", startDate: "2023-05", endDate: "2023-08" },
+    {
+      company: "Acme Corp",
+      title: "Software Engineer",
+      startDate: "2024-01",
+      endDate: null,
+      location: null,
+      description: null,
+    },
+    {
+      company: "OldCo",
+      title: "Intern",
+      startDate: "2023-05",
+      endDate: "2023-08",
+      location: null,
+      description: null,
+    },
   ],
   education: [],
 };

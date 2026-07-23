@@ -30,7 +30,10 @@ function minimalPdf(): Uint8Array {
 describe("extractPdfText", () => {
   it("does not detach the caller's buffer (so resume can still be written to disk)", async () => {
     const bytes = minimalPdf();
-    const shared = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    const shared = bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    ) as ArrayBuffer;
     expect(shared.byteLength).toBeGreaterThan(0);
 
     await extractPdfText(shared);

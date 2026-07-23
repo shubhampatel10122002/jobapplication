@@ -1,6 +1,7 @@
 import { generateObject, generateText } from "ai";
+import { z } from "zod";
 import { getModel, rateLimited } from "../llm";
-import type { LlmAnswerFn, LlmQuestion } from "./engine";
+import { MULTI_VALUE_SEPARATOR, type LlmAnswerFn, type LlmQuestion } from "./engine";
 
 function contextBlock(q: LlmQuestion): string {
   return `You are filling out a job application on behalf of a candidate. Answer truthfully,
@@ -25,6 +26,22 @@ ${q.knowledgeBase.length > 0 ? q.knowledgeBase.map((k) => `- ${k}`).join("\n") :
  */
 export const llmAnswer: LlmAnswerFn = async (q) => {
   if (q.optionLabels && q.optionLabels.length > 0) {
+    if (q.type === "multi_select") {
+      const { object } = await rateLimited(() =>
+        generateObject({
+          model: getModel(),
+          output: "array",
+          schema: z.enum(q.optionLabels as [string, ...string[]]),
+          prompt: `${contextBlock(q)}
+
+APPLICATION QUESTION (choose one or more of the allowed options; pick only what
+truthfully applies to the candidate):
+${q.label}`,
+        }),
+      );
+      return object.join(MULTI_VALUE_SEPARATOR);
+    }
+
     const { object } = await rateLimited(() =>
       generateObject({
         model: getModel(),

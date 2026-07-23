@@ -15,6 +15,7 @@ export type FieldType =
   | "select"
   | "multi_select"
   | "boolean"
+  | "date"
   | "file"
   | "email"
   | "phone"
