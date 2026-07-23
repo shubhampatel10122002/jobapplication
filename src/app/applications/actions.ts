@@ -17,6 +17,7 @@ import { llmAnswer } from "@/lib/answer/llm";
 import { fetchJobFromUrl } from "@/lib/ats";
 import { checkEligibility } from "@/lib/eligibility/filter";
 import { hasLlmKey } from "@/lib/llm";
+import { llmChooseOption } from "@/lib/submit/choose";
 import { isDryRun } from "@/lib/submit/mode";
 import { submitWithPlaywright } from "@/lib/submit/playwright";
 
@@ -80,20 +81,27 @@ export async function saveAnswersAction(
     );
 
     for (const row of detail.answers) {
-      const raw = formData.get(`answer_${row.id}`);
-      if (typeof raw !== "string") continue;
-      const trimmed = raw.trim();
+      // getAll: multi-select answers arrive as several checkbox entries.
+      const raw = formData
+        .getAll(`answer_${row.id}`)
+        .filter((v): v is string => typeof v === "string")
+        .map((v) => v.trim());
+      if (raw.length === 0 && row.fieldType !== "multi_select") continue;
+      const trimmed = raw.filter(Boolean).join("; ");
       const current = row.answer ?? "";
       if (trimmed === current) continue;
 
       const options = optionsByFieldId.get(row.fieldId) ?? [];
-      const option = options.find((o) => o.value === trimmed);
-      await updateAnswerValue(
-        applicationId,
-        row.id,
-        trimmed,
-        option?.label ?? (options.length > 0 ? null : trimmed),
-      );
+      const labelFor = (value: string) => options.find((o) => o.value === value)?.label ?? null;
+      const parts = trimmed.split(";").map((s) => s.trim()).filter(Boolean);
+      const labels = parts.map(labelFor);
+      const answerLabel =
+        options.length === 0
+          ? trimmed
+          : labels.every((l) => l !== null)
+            ? labels.join("; ")
+            : null;
+      await updateAnswerValue(applicationId, row.id, trimmed, answerLabel);
     }
     revalidatePath(`/applications/${applicationId}`);
     return { ok: "Answers saved." };
@@ -173,6 +181,7 @@ export async function submitApplicationAction(
       resumePath: profileRow?.resumePath ?? null,
       dryRun,
       screenshotPath,
+      chooseOption: hasLlmKey() ? llmChooseOption : undefined,
     });
 
     const statusMap = {
@@ -189,6 +198,7 @@ export async function submitApplicationAction(
         dryRun,
         filledLabels: result.filledLabels,
         unfilledLabels: result.unfilledLabels,
+        fieldReports: result.fieldReports,
         answers: resolved.map((r) => ({
           fieldId: r.field.id,
           label: r.field.label,

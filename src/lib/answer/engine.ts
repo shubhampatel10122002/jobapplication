@@ -45,6 +45,9 @@ export function questionHash(field: NormalizedField): string {
   return createHash("sha256").update(normalized).digest("hex");
 }
 
+/** Separator for multi-select answers ("Label A; Label B"). */
+export const MULTI_VALUE_SEPARATOR = "; ";
+
 function selectValueForLabel(
   field: NormalizedField,
   answerLabel: string,
@@ -54,6 +57,25 @@ function selectValueForLabel(
   );
   if (exact) return { value: exact.value, label: exact.label };
   return null;
+}
+
+/** Resolve a possibly multi-valued answer ("A; B") against the field's options. */
+function resolveOptionAnswer(
+  field: NormalizedField,
+  answerText: string,
+): { value: string; label: string } | null {
+  if (field.type !== "multi_select") return selectValueForLabel(field, answerText);
+  const parts = answerText
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+  const resolved = parts.map((p) => selectValueForLabel(field, p));
+  if (resolved.some((r) => r === null)) return null;
+  return {
+    value: resolved.map((r) => r!.value).join(MULTI_VALUE_SEPARATOR),
+    label: resolved.map((r) => r!.label).join(MULTI_VALUE_SEPARATOR),
+  };
 }
 
 export interface PlanAnswersOptions {
@@ -150,7 +172,7 @@ export async function planAnswers({
     }
 
     if (field.options.length > 0) {
-      const resolved = selectValueForLabel(field, answerText);
+      const resolved = resolveOptionAnswer(field, answerText);
       planned.push({
         field,
         source: resolved ? "llm" : "unresolved",

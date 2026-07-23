@@ -43,7 +43,9 @@ export default async function ProfilePage() {
       {!dbError && (
         <>
           <ResumeUploadForm hasResume={!!row?.resumePath} />
-          <ProfileForm profile={row?.data ?? EMPTY_PROFILE} />
+          {/* Keyed on version: the form is uncontrolled (defaultValue), so it must
+              remount to show freshly parsed resume data after an upload. */}
+          <ProfileForm key={row?.version ?? 0} profile={row?.data ?? EMPTY_PROFILE} />
           <KnowledgeBase entries={row?.knowledgeBase ?? []} />
 
           <div className="rounded-lg border border-zinc-200 bg-white p-5 text-sm text-zinc-600">
