@@ -1,3 +1,8 @@
-ignoredBuiltDependencies:
-  - sharp
-  - unrs-resolver
+# pnpm 11 gates dependency build/install scripts behind this allowlist.
+# These three ship prebuilt native binaries via optional platform packages and
+# are safe/expected to build. Without this, `pnpm install` fails with
+# ERR_PNPM_IGNORED_BUILDS (strictDepBuilds defaults to true).
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
